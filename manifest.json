@@ -1,0 +1,19 @@
+{
+  "name": "Văn Phòng Làm Game",
+  "short_name": "Văn Phòng Game",
+  "description": "Văn phòng làm game 2 tầng phong cách dollhouse pastel — theo dõi đội ngũ, bảng công việc và nhật ký hoạt động.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#EFE8FA",
+  "theme_color": "#5C4742",
+  "lang": "vi",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

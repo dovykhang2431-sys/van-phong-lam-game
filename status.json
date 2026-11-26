@@ -1,0 +1,168 @@
+{
+  "updatedAt": "2026-11-26T11:45:00+07:00",
+  "officeName": "Văn Phòng Làm Game",
+  "agents": [
+    {
+      "id": "khang",
+      "name": "Khang",
+      "role": "Giám đốc",
+      "floor": "upper",
+      "color": "#F59E0B",
+      "status": "working",
+      "currentTask": "Duyệt bản mẫu Văn Phòng Làm Game v1.0 & điều phối đội ngũ",
+      "lastDone": "Chốt brief chi tiết dự án Văn Phòng Làm Game v1.0"
+    },
+    {
+      "id": "muse",
+      "name": "Muse",
+      "role": "Quản lý & Kiểm tra",
+      "floor": "lower",
+      "color": "#3B82F6",
+      "status": "working",
+      "currentTask": "Kiểm tra bản Logistic Center v1.3 trên màn hình ngang",
+      "lastDone": "Lập danh sách nghiệm thu 5 hạng mục cho Văn Phòng v1.0"
+    },
+    {
+      "id": "gemini",
+      "name": "Gemini",
+      "role": "Lập trình chính",
+      "floor": "lower",
+      "color": "#8B5CF6",
+      "status": "working",
+      "currentTask": "Phát triển tính năng Logistic Center v1.3",
+      "lastDone": "Tối ưu vòng lặp 60fps mượt mà cho hệ thống băng chuyền"
+    },
+    {
+      "id": "mochi",
+      "name": "Mochi",
+      "role": "Họa sĩ asset",
+      "floor": "lower",
+      "color": "#EC4899",
+      "status": "done",
+      "currentTask": "Vẽ asset nhân vật chibi & đồ nội thất 2 tầng",
+      "lastDone": "Hoàn tất bộ bảng màu pastel & biển hiệu OFFICE"
+    },
+    {
+      "id": "sora",
+      "name": "Sora",
+      "role": "Nghiên cứu",
+      "floor": "lower",
+      "color": "#10B981",
+      "status": "idle",
+      "currentTask": "Nghiên cứu ý tưởng mini-game mới cho quý tới",
+      "lastDone": "Tổng hợp tài liệu bố cục văn phòng dollhouse isometric"
+    },
+    {
+      "id": "antigravity",
+      "name": "Antigravity",
+      "role": "Thợ xây",
+      "floor": "lower",
+      "color": "#F97316",
+      "status": "working",
+      "currentTask": "Xây văn phòng làm game v1.0 (2 tầng, 6 nhân vật, PWA)",
+      "lastDone": "Dựng kiến trúc dữ liệu status.json và bộ kiểm thử tự động"
+    }
+  ],
+  "jobs": [
+    {
+      "id": "job-1",
+      "title": "Logistic Center v1.3",
+      "owner": "Gemini",
+      "status": "doing",
+      "startedAt": "09:15",
+      "description": "Cập nhật cơ chế kho vận mới và tối ưu tốc độ khung hình trên di động."
+    },
+    {
+      "id": "job-2",
+      "title": "Kiểm tra bản v1.3",
+      "owner": "Muse",
+      "status": "doing",
+      "startedAt": "10:05",
+      "description": "Chạy kiểm thử giao diện ngang, nút bấm, lưu dữ liệu và log console."
+    },
+    {
+      "id": "job-3",
+      "title": "Xây Văn Phòng Làm Game v1.0",
+      "owner": "Antigravity",
+      "status": "doing",
+      "startedAt": "10:40",
+      "description": "Hoàn thiện văn phòng 2 tầng phong cách dollhouse pastel, popup tương tác và PWA."
+    },
+    {
+      "id": "job-4",
+      "title": "Vẽ asset chibi & nội thất văn phòng",
+      "owner": "Mochi",
+      "status": "waiting",
+      "startedAt": "08:50",
+      "description": "Đã vẽ xong 6 nhân vật chibi màu riêng và vật dụng từng bàn, chờ giám đốc duyệt."
+    },
+    {
+      "id": "job-5",
+      "title": "Nghiên cứu phong cách isometric dollhouse",
+      "owner": "Sora",
+      "status": "done",
+      "startedAt": "08:10",
+      "description": "Phân tích ánh sáng ấm, màu pastel và bố cục 2 tầng không cắt mép."
+    },
+    {
+      "id": "job-6",
+      "title": "Duyệt brief & lộ trình v1.0",
+      "owner": "Khang",
+      "status": "done",
+      "startedAt": "08:00",
+      "description": "Ban hành brief chuẩn cho toàn đội trước khi triển khai."
+    }
+  ],
+  "activity": [
+    {
+      "time": "11:42",
+      "agent": "Antigravity",
+      "text": "Đang hoàn thiện 2 tầng văn phòng, chip trạng thái và popup tương tác"
+    },
+    {
+      "time": "11:30",
+      "agent": "Muse",
+      "text": "Bắt đầu kiểm tra bản Logistic Center v1.3 trên khung hình ngang"
+    },
+    {
+      "time": "11:18",
+      "agent": "Mochi",
+      "text": "Gửi bộ asset nhân vật chibi & nội thất lên bảng chờ duyệt"
+    },
+    {
+      "time": "11:05",
+      "agent": "Gemini",
+      "text": "Cập nhật xong hệ thống chuyển động mượt cho Logistic Center v1.3"
+    },
+    {
+      "time": "10:40",
+      "agent": "Antigravity",
+      "text": "Bắt đầu xây dựng Văn Phòng Làm Game v1.0 từ ảnh mẫu"
+    },
+    {
+      "time": "10:22",
+      "agent": "Sora",
+      "text": "Hoàn thành báo cáo nghiên cứu bố cục 2 tầng isometric pastel"
+    },
+    {
+      "time": "09:50",
+      "agent": "Khang",
+      "text": "Góp ý thêm bể cá, két sắt và bảng hiệu OFFICE cho phòng giám đốc"
+    },
+    {
+      "time": "09:15",
+      "agent": "Gemini",
+      "text": "Bắt đầu phát triển phiên bản Logistic Center v1.3"
+    },
+    {
+      "time": "08:50",
+      "agent": "Mochi",
+      "text": "Bắt đầu phác thảo 6 nhân vật chibi với màu đặc trưng từng người"
+    },
+    {
+      "time": "08:15",
+      "agent": "Khang",
+      "text": "Mở cửa văn phòng và chốt kế hoạch làm việc trong ngày"
+    }
+  ]
+}

@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#5C4742">
+  <meta name="description" content="Văn Phòng Làm Game v1.0 — Theo dõi đội ngũ làm game 2 tầng phong cách dollhouse pastel.">
+  <title>Văn Phòng Làm Game v1.0</title>
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body data-theme="day">
+  <div class="app-shell">
+    <!-- Thanh tiêu đề trên cùng -->
+    <header class="topbar" role="banner">
+      <div class="brand-group">
+        <div class="brand-logo" aria-hidden="true">🏠</div>
+        <div class="brand-text">
+          <h1 class="brand-title">Văn Phòng Làm Game</h1>
+          <span class="version-badge" id="versionBadge">v1.0</span>
+        </div>
+      </div>
+
+      <nav class="topbar-controls" aria-label="Điều khiển văn phòng">
+        <div class="room-switcher" role="group" aria-label="Chọn tầng">
+          <button type="button" class="btn-chip" id="btnFloorUpper" data-floor="upper" aria-pressed="false">
+            👑 Tầng 2
+          </button>
+          <button type="button" class="btn-chip" id="btnFloorLower" data-floor="lower" aria-pressed="false">
+            💻 Tầng 1
+          </button>
+        </div>
+
+        <div class="clock-pill" id="liveClock" title="Đồng hồ giờ hiện tại" aria-live="off">
+          <span class="clock-dot" aria-hidden="true"></span>
+          <span id="clockTime">--:--:--</span>
+        </div>
+
+        <button type="button" class="btn-icon" id="btnThemeToggle" title="Chuyển chế độ ngày / đêm" aria-label="Chuyển chế độ ngày và đêm">
+          <span id="themeIcon" aria-hidden="true">☀️</span>
+          <span class="btn-label" id="themeLabel">Ngày</span>
+        </button>
+
+        <button type="button" class="btn-icon" id="btnReload" title="Tải lại dữ liệu từ status.json" aria-label="Tải lại dữ liệu">
+          <span aria-hidden="true">↻</span>
+          <span class="btn-label">Cập nhật</span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- Nội dung chính: Bên trái là Văn phòng 2 tầng, Bên phải là Bảng công việc & Nhật ký -->
+    <main class="main-layout">
+      <!-- Khu vực Văn Phòng 2 Tầng -->
+      <section class="office-stage" aria-label="Mô hình Văn Phòng Làm Game 2 tầng">
+        <div class="office-canvas-wrap" id="officeCanvasWrap">
+          <!-- SVG văn phòng 2 tầng được dựng động bởi js/office-svg.js -->
+        </div>
+
+        <!-- Chú thích phòng khi người dùng bấm vào Tầng trên / Tầng dưới -->
+        <aside class="room-caption hidden" id="roomCaption" aria-live="polite">
+          <div class="room-caption-head">
+            <strong id="roomCaptionTitle">Phòng Giám Đốc</strong>
+            <button type="button" class="caption-close" id="btnCloseRoomCaption" aria-label="Bỏ chọn phòng">✕ Xem cả 2 tầng</button>
+          </div>
+          <p class="room-caption-desc" id="roomCaptionDesc"></p>
+          <div class="room-caption-members" id="roomCaptionMembers"></div>
+        </aside>
+
+        <!-- Thanh chú giải trạng thái nhỏ gọn -->
+        <div class="status-legend" aria-label="Chú thích màu trạng thái">
+          <span class="legend-item"><i class="dot dot-working"></i>Đang làm</span>
+          <span class="legend-item"><i class="dot dot-idle"></i>Rảnh</span>
+          <span class="legend-item"><i class="dot dot-done"></i>Xong / Chờ duyệt</span>
+          <span class="legend-hint">Bấm nhân vật hoặc phòng để xem</span>
+        </div>
+      </section>
+
+      <!-- Bảng bên phải: Bảng công việc & Nhật ký hoạt động -->
+      <aside class="side-panel" aria-label="Bảng công việc và nhật ký hoạt động">
+        <!-- Tab chuyển nhanh cho màn hình điện thoại ngang có chiều cao thấp -->
+        <div class="panel-tabs" role="tablist" aria-label="Chuyển bảng thông tin">
+          <button type="button" class="panel-tab active" role="tab" aria-selected="true" id="tabJobs" data-tab="jobs">
+            📋 Công việc <span class="count-badge" id="jobsCount">0</span>
+          </button>
+          <button type="button" class="panel-tab" role="tab" aria-selected="false" id="tabActivity" data-tab="activity">
+            🕒 Nhật ký <span class="count-badge" id="activityCount">0</span>
+          </button>
+        </div>
+
+        <!-- Bảng Công Việc -->
+        <section class="board-card panel-section active" id="sectionJobs" aria-labelledby="jobsHeading">
+          <header class="board-header">
+            <h2 id="jobsHeading">📋 Bảng công việc</h2>
+            <span class="board-sub" id="jobsSummary">Đang tải...</span>
+          </header>
+          <ul class="jobs-list" id="jobsList">
+            <li class="empty-state">Đang đọc dữ liệu từ status.json...</li>
+          </ul>
+        </section>
+
+        <!-- Nhật Ký Hoạt Động -->
+        <section class="board-card panel-section" id="sectionActivity" aria-labelledby="activityHeading">
+          <header class="board-header">
+            <h2 id="activityHeading">🕒 Nhật ký hoạt động</h2>
+            <span class="board-sub" id="activitySummary">Mới nhất lên đầu</span>
+          </header>
+          <ul class="activity-list" id="activityList">
+            <li class="empty-state">Đang đọc nhật ký hoạt động...</li>
+          </ul>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <!-- Popup chi tiết (nhân vật / công việc) -->
+  <div class="modal-backdrop hidden" id="modalBackdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card" id="modalCard">
+      <div class="modal-header">
+        <div class="modal-title-wrap">
+          <span class="modal-avatar" id="modalAvatar" aria-hidden="true"></span>
+          <div>
+            <h3 class="modal-title" id="modalTitle">Tiêu đề</h3>
+            <p class="modal-subtitle" id="modalSubtitle"></p>
+          </div>
+        </div>
+        <button type="button" class="modal-close" id="btnCloseModal" aria-label="Đóng hộp thoại">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer">
+        <button type="button" class="btn-primary" id="btnModalOk">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Thông báo nổi ngắn (toast) -->
+  <div class="toast hidden" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="./js/office-svg.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
