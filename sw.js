@@ -1,4 +1,4 @@
-const CACHE_NAME = 'van-phong-lam-game-cache-v1.0';
+const CACHE_NAME = 'van-phong-lam-game-cache-v1.2';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -31,6 +31,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
+
+  // API trực tiếp: chỉ đi mạng, không ghi cache (dữ liệu luôn mới nhất)
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   // Luôn ưu tiên mạng cho status.json để lấy dữ liệu mới nhất, mất mạng mới dùng cache
   if (url.pathname.endsWith('/status.json') || url.pathname.endsWith('status.json')) {

@@ -7,9 +7,12 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0';
+  const VERSION = '1.2';
   const POLL_INTERVAL_MS = 5000;
   const HIGHLIGHT_DURATION_MS = 1750;
+  const STATUS_API_URL = '/api/status';
+  const STATUS_FILE_URL = './status.json';
+  const API_FAIL_LIMIT = 2;
   const THEME_STORAGE_KEY = 'van_phong_lam_game_theme';
 
   const ROOM_INFO = {
@@ -49,6 +52,8 @@
     pollTimerId: null,
     lastUpdatedText: '',
     syncStatus: 'loading',
+    dataSource: null, // 'api' (trực tiếp) | 'file' (dữ liệu tĩnh dự phòng)
+    apiFailCount: 0,
     openModal: null,
     jobsSignatures: new Map(),
     activitySnapshot: ''
@@ -73,6 +78,7 @@
     liveSyncStatus: document.getElementById('liveSyncStatus'),
     liveSyncDot: document.getElementById('liveSyncDot'),
     liveSyncText: document.getElementById('liveSyncText'),
+    liveSyncSource: document.getElementById('liveSyncSource'),
     tabJobs: document.getElementById('tabJobs'),
     tabActivity: document.getElementById('tabActivity'),
     sectionJobs: document.getElementById('sectionJobs'),
@@ -135,9 +141,20 @@
   }
 
   // Cập nhật chỉ báo trực tiếp "Cập nhật lúc HH:MM:SS" / "đang thử lại"
-  function setLiveSyncUI(mode, timeStr) {
+  // source: 'api' = Trực tiếp (Vercel API), 'file' = Dữ liệu tĩnh (status.json)
+  function setLiveSyncUI(mode, timeStr, source) {
     state.syncStatus = mode;
+    if (source) state.dataSource = source;
     if (!el.liveSyncStatus || !el.liveSyncText) return;
+
+    if (el.liveSyncSource) {
+      el.liveSyncSource.textContent =
+        state.dataSource === 'api'
+          ? '· Trực tiếp'
+          : state.dataSource === 'file'
+            ? '· Dữ liệu tĩnh'
+            : '';
+    }
 
     if (mode === 'ok') {
       el.liveSyncStatus.classList.remove('is-retrying');
@@ -282,6 +299,13 @@
       }
 
       const chipNode = svg.querySelector(`[data-chip-id="${agent.id}"]`);
+      if (chipNode) {
+        // Agent "working" nhưng quá 15 phút không báo cáo: làm mờ chip
+        chipNode.classList.toggle('stale-chip', Boolean(agent.stale));
+        if (!prev || prev.stale !== agent.stale) {
+          triggerLiveHighlight(chipNode);
+        }
+      }
       if (chipNode && chipVisualChanged) {
         window.OfficeSVG.updateStatusChip(chipNode, agent);
       }
@@ -707,6 +731,7 @@
       <div class="modal-tags">
         <span class="status-pill ${escapeHTML(agent.status || 'working')}">● ${escapeHTML(statusMeta.label)}</span>
         <span class="floor-tag">🏠 ${escapeHTML(floorText)}</span>
+        ${agent.stale ? '<span class="stale-tag">⏱ chưa cập nhật</span>' : ''}
       </div>
       <div class="info-block">
         <span class="info-label">Việc đang làm</span>
@@ -865,59 +890,95 @@
     state.rafId = requestAnimationFrame(tick);
   }
 
-  // ===== Đọc dữ liệu từ status.json (cache-busting + giữ dữ liệu cũ khi lỗi) =====
+  // Áp dụng dữ liệu vừa tải vào trang (dùng chung cho API và file dự phòng)
+  function applyStatusJson(json, isManualReload, source) {
+    const prevData = state.data;
+    const isInitial = !state.hasLoadedOnce;
+
+    state.data = {
+      agents: Array.isArray(json.agents) ? json.agents : [],
+      jobs: Array.isArray(json.jobs) ? json.jobs : [],
+      activity: Array.isArray(json.activity) ? json.activity : []
+    };
+
+    if (!state.officeRendered) {
+      renderOffice();
+    } else {
+      patchOfficeInPlace(prevData.agents, state.data.agents);
+    }
+
+    renderJobsInPlace(isInitial);
+    renderActivityInPlace(isInitial);
+    syncOpenModalIfChanged(prevData);
+
+    const nowStr = formatTimeHMS(new Date());
+    state.lastUpdatedText = nowStr;
+    state.hasLoadedOnce = true;
+    setLiveSyncUI('ok', nowStr, source);
+
+    if (isManualReload) {
+      showToast(
+        source === 'file'
+          ? 'Đã cập nhật dữ liệu tĩnh từ status.json'
+          : 'Đã cập nhật dữ liệu trực tiếp'
+      );
+    }
+  }
+
+  // ===== Đọc dữ liệu: ưu tiên API trực tiếp (/api/status), lỗi 2 lần liên
+  // tiếp thì rơi về file status.json tĩnh; mất cả hai thì giữ dữ liệu cũ =====
   async function loadStatusData(isManualReload) {
     if (state.isFetching) return false;
     state.isFetching = true;
 
     try {
-      const url = `./status.json?t=${Date.now()}`;
-      const res = await fetch(url, { cache: 'no-store' });
+      const res = await fetch(`${STATUS_API_URL}?t=${Date.now()}`, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-
-      const prevData = state.data;
-      const isInitial = !state.hasLoadedOnce;
-
-      state.data = {
-        agents: Array.isArray(json.agents) ? json.agents : [],
-        jobs: Array.isArray(json.jobs) ? json.jobs : [],
-        activity: Array.isArray(json.activity) ? json.activity : []
-      };
-
-      if (!state.officeRendered) {
-        renderOffice();
-      } else {
-        patchOfficeInPlace(prevData.agents, state.data.agents);
-      }
-
-      renderJobsInPlace(isInitial);
-      renderActivityInPlace(isInitial);
-      syncOpenModalIfChanged(prevData);
-
-      const nowStr = formatTimeHMS(new Date());
-      state.lastUpdatedText = nowStr;
-      state.hasLoadedOnce = true;
-      setLiveSyncUI('ok', nowStr);
-
-      if (isManualReload) {
-        showToast('Đã cập nhật dữ liệu mới từ status.json');
-      }
+      state.apiFailCount = 0;
+      applyStatusJson(json, isManualReload, 'api');
       return true;
-    } catch (_err) {
-      // Mất mạng / lỗi tạm thời: giữ nguyên dữ liệu cũ, hiện trạng thái "đang thử lại", không làm trang trắng
-      setLiveSyncUI('retrying');
-      if (!state.hasLoadedOnce) {
-        if (!state.officeRendered) {
-          renderOffice();
+    } catch (apiErr) {
+      state.apiFailCount += 1;
+
+      // Chưa đủ 2 lần lỗi liên tiếp: chờ lần poll sau thử lại API, chưa vội rơi về file
+      if (state.apiFailCount < API_FAIL_LIMIT) {
+        setLiveSyncUI('retrying');
+        if (!state.hasLoadedOnce) {
+          if (!state.officeRendered) {
+            renderOffice();
+          }
+          el.jobsSummary.textContent = 'Đang thử lại...';
+          el.jobsList.innerHTML = '<li class="empty-state">Đang kết nối tới API trực tiếp, đang thử lại...</li>';
+          el.activityList.innerHTML = '<li class="empty-state">Đang thử lại lấy nhật ký hoạt động...</li>';
+        } else if (isManualReload) {
+          showToast('Mất kết nối API — giữ dữ liệu cũ, đang thử lại');
         }
-        el.jobsSummary.textContent = 'Đang thử lại...';
-        el.jobsList.innerHTML = '<li class="empty-state">Đang kết nối tới status.json, đang thử lại...</li>';
-        el.activityList.innerHTML = '<li class="empty-state">Đang thử lại lấy nhật ký hoạt động...</li>';
-      } else if (isManualReload) {
-        showToast('Mất kết nối — giữ dữ liệu cũ, đang thử lại');
+        return false;
       }
-      return false;
+
+      // API lỗi 2 lần liên tiếp: đọc file status.json tĩnh làm dự phòng
+      try {
+        const res = await fetch(`${STATUS_FILE_URL}?t=${Date.now()}`, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        applyStatusJson(json, isManualReload, 'file');
+        return true;
+      } catch (_fileErr) {
+        // Mất mạng / lỗi tạm thời: giữ nguyên dữ liệu cũ, hiện trạng thái "đang thử lại", không làm trang trắng
+        setLiveSyncUI('retrying');
+        if (!state.hasLoadedOnce) {
+          if (!state.officeRendered) {
+            renderOffice();
+          }
+          el.jobsSummary.textContent = 'Đang thử lại...';
+          el.jobsList.innerHTML = '<li class="empty-state">Đang kết nối tới status.json, đang thử lại...</li>';
+          el.activityList.innerHTML = '<li class="empty-state">Đang thử lại lấy nhật ký hoạt động...</li>';
+        } else if (isManualReload) {
+          showToast('Mất kết nối — giữ dữ liệu cũ, đang thử lại');
+        }
+        return false;
+      }
     } finally {
       state.isFetching = false;
     }
@@ -926,6 +987,8 @@
   function startLivePolling() {
     if (state.pollTimerId) clearInterval(state.pollTimerId);
     state.pollTimerId = setInterval(() => {
+      // Tab đang ẩn: bỏ qua lượt poll để đỡ tốn hạn mức API, mở lại tab sẽ tải ngay (visibilitychange)
+      if (document.hidden) return;
       loadStatusData(false);
     }, POLL_INTERVAL_MS);
   }
@@ -1041,6 +1104,7 @@
       getSelectedRoom: () => state.selectedRoom,
       getLastUpdated: () => state.lastUpdatedText,
       getSyncStatus: () => state.syncStatus,
+      getDataSource: () => state.dataSource,
       reload: () => loadStatusData(false),
       highlightRoom: (roomId) => toggleRoomHighlight(roomId)
     };

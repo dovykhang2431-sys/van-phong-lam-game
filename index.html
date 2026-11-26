@@ -4,8 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#5C4742">
-  <meta name="description" content="Văn Phòng Làm Game v1.0 — Theo dõi đội ngũ làm game 2 tầng phong cách dollhouse pastel.">
-  <title>Văn Phòng Làm Game v1.0</title>
+  <meta name="description" content="Văn Phòng Làm Game v1.2 — Theo dõi đội ngũ làm game 2 tầng phong cách dollhouse pastel, cập nhật trực tiếp qua API.">
+  <title>Văn Phòng Làm Game v1.2</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" type="image/svg+xml" href="./icons/icon.svg">
   <link rel="stylesheet" href="./css/style.css">
@@ -42,7 +42,7 @@
           <span class="btn-label" id="themeLabel">Ngày</span>
         </button>
 
-        <button type="button" class="btn-icon" id="btnReload" title="Tải lại dữ liệu từ status.json" aria-label="Tải lại dữ liệu">
+        <button type="button" class="btn-icon" id="btnReload" title="Tải lại dữ liệu" aria-label="Tải lại dữ liệu">
           <span aria-hidden="true">↻</span>
           <span class="btn-label">Cập nhật</span>
         </button>
@@ -72,9 +72,10 @@
           <span class="legend-item"><i class="dot dot-working"></i>Đang làm</span>
           <span class="legend-item"><i class="dot dot-idle"></i>Rảnh</span>
           <span class="legend-item"><i class="dot dot-done"></i>Xong / Chờ duyệt</span>
-          <span class="live-sync-status" id="liveSyncStatus" aria-live="polite" title="Tự động kiểm tra status.json mỗi 5 giây">
+          <span class="live-sync-status" id="liveSyncStatus" aria-live="polite" title="Tự động kiểm tra mỗi 5 giây (API trực tiếp, dự phòng status.json)">
             <i class="sync-dot" id="liveSyncDot" aria-hidden="true"></i>
             <span id="liveSyncText">Đang tải...</span>
+            <span class="live-sync-source" id="liveSyncSource"></span>
           </span>
           <span class="legend-hint">Bấm nhân vật hoặc phòng để xem</span>
         </div>

@@ -514,6 +514,34 @@ body[data-theme="night"] .room-ambient-tint {
   animation: retryBlink 1.2s ease-in-out infinite;
 }
 
+/* Nhãn nguồn dữ liệu: "Trực tiếp" (API) hoặc "Dữ liệu tĩnh" (status.json dự phòng) */
+.live-sync-source {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+/* Chip của agent "working" nhưng quá 15 phút không báo cáo: làm mờ */
+.svg-chip-hit.stale-chip {
+  opacity: 0.55;
+}
+
+/* Tag "chưa cập nhật" trong popup chi tiết nhân vật */
+.stale-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--status-waiting-bg);
+  border: 1.5px solid var(--status-waiting);
+  color: var(--status-waiting);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 /* Hiệu ứng làm nổi nhẹ khi chip hoặc dòng vừa đổi trạng thái */
 .svg-chip-hit.live-updated {
   animation: chipLivePulse 1.7s ease-out;
