@@ -81,6 +81,34 @@
     }
   }
 
+  // Biểu cảm mắt & miệng theo trạng thái (tách riêng để cập nhật tại chỗ không vẽ lại toàn SVG)
+  function renderExpressionSVG(status) {
+    const isIdle = status === 'idle';
+    const isDone = status === 'done';
+    const eyes = isIdle
+      ? `
+        <path d="M-8,-21 Q-5.5,-18.5 -3,-21" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>
+        <path d="M3,-21 Q5.5,-18.5 8,-21" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>
+      `
+      : isDone
+      ? `
+        <path d="M-8,-20 Q-5.5,-24 -3,-20" fill="none" stroke="${INK}" stroke-width="2.1" stroke-linecap="round"/>
+        <path d="M3,-20 Q5.5,-24 8,-20" fill="none" stroke="${INK}" stroke-width="2.1" stroke-linecap="round"/>
+      `
+      : `
+        <circle cx="-5.5" cy="-21" r="2.2" fill="${INK}"/>
+        <circle cx="5.5" cy="-21" r="2.2" fill="${INK}"/>
+        <circle cx="-6.2" cy="-21.8" r="0.7" fill="#FFF"/>
+        <circle cx="4.8" cy="-21.8" r="0.7" fill="#FFF"/>
+      `;
+
+    const mouth = isDone
+      ? `<path d="M-3.5,-15.5 Q0,-12 3.5,-15.5" fill="none" stroke="${INK}" stroke-width="1.9" stroke-linecap="round"/>`
+      : `<path d="M-2.8,-15.5 Q0,-13.5 2.8,-15.5" fill="none" stroke="${INK}" stroke-width="1.8" stroke-linecap="round"/>`;
+
+    return `${eyes}${mouth}`;
+  }
+
   // Vẽ nhân vật chibi mèo tròn trịa đáng yêu (mỗi người màu & phụ kiện riêng)
   function renderChibiCharacter(agent, x, y, scale = 1) {
     const id = agent.id;
@@ -136,29 +164,7 @@
       `;
     }
 
-    // Biểu cảm theo trạng thái
-    const isIdle = agent.status === 'idle';
-    const isDone = agent.status === 'done';
-    const eyes = isIdle
-      ? `
-        <path d="M-8,-21 Q-5.5,-18.5 -3,-21" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>
-        <path d="M3,-21 Q5.5,-18.5 8,-21" fill="none" stroke="${INK}" stroke-width="2" stroke-linecap="round"/>
-      `
-      : isDone
-      ? `
-        <path d="M-8,-20 Q-5.5,-24 -3,-20" fill="none" stroke="${INK}" stroke-width="2.1" stroke-linecap="round"/>
-        <path d="M3,-20 Q5.5,-24 8,-20" fill="none" stroke="${INK}" stroke-width="2.1" stroke-linecap="round"/>
-      `
-      : `
-        <circle cx="-5.5" cy="-21" r="2.2" fill="${INK}"/>
-        <circle cx="5.5" cy="-21" r="2.2" fill="${INK}"/>
-        <circle cx="-6.2" cy="-21.8" r="0.7" fill="#FFF"/>
-        <circle cx="4.8" cy="-21.8" r="0.7" fill="#FFF"/>
-      `;
-
-    const mouth = isDone
-      ? `<path d="M-3.5,-15.5 Q0,-12 3.5,-15.5" fill="none" stroke="${INK}" stroke-width="1.9" stroke-linecap="round"/>`
-      : `<path d="M-2.8,-15.5 Q0,-13.5 2.8,-15.5" fill="none" stroke="${INK}" stroke-width="1.8" stroke-linecap="round"/>`;
+    const expression = renderExpressionSVG(agent.status);
 
     return `
       <g class="agent-anim-body" data-agent-anim="${id}" data-status="${agent.status || 'working'}">
@@ -185,8 +191,7 @@
           <ellipse cx="-9.5" cy="-17.5" rx="3" ry="1.8" fill="#FB7185" opacity="0.55"/>
           <ellipse cx="9.5" cy="-17.5" rx="3" ry="1.8" fill="#FB7185" opacity="0.55"/>
           <!-- Mắt & Miệng -->
-          ${eyes}
-          ${mouth}
+          <g class="agent-expression">${expression}</g>
           ${faceExtra}
           ${accessory}
         </g>
@@ -357,39 +362,115 @@
     `;
   }
 
-  // Vẽ chip trạng thái nổi phía trên đầu mỗi nhân vật (căn khoảng cách chữ chuẩn, không dính chữ)
-  function renderStatusChip(agent, x, y) {
+  // Tính kích thước hình học chip trạng thái để dùng chung lúc vẽ mới và cập nhật tại chỗ
+  function computeChipLayout(agent) {
     const meta = getStatusMeta(agent.status);
-    const nameText = agent.name;
+    const nameText = agent.name || '';
     const statusText = meta.label;
-    const floorKey = agent.floor || (agent.id === 'khang' ? 'upper' : 'lower');
-
     const nameW = Math.ceil(nameText.length * 7.8) + 8;
     const badgeW = Math.ceil(statusText.length * 6.8) + 22;
     const chipW = 24 + nameW + 6 + badgeW + 6;
     const halfW = chipW / 2;
     const badgeX = halfW - badgeW - 5;
+    return { meta, nameText, statusText, badgeW, chipW, halfW, badgeX };
+  }
+
+  // Vẽ chip trạng thái nổi phía trên đầu mỗi nhân vật (căn khoảng cách chữ chuẩn, không dính chữ)
+  function renderStatusChip(agent, x, y) {
+    const layout = computeChipLayout(agent);
+    const floorKey = agent.floor || (agent.id === 'khang' ? 'upper' : 'lower');
 
     return `
-      <g class="svg-chip-hit chip-float" data-agent-id="${agent.id}" data-chip-id="${agent.id}" data-floor="${floorKey}" tabindex="0" role="button" aria-label="${nameText}: ${statusText}">
+      <g class="svg-chip-hit chip-float" data-agent-id="${agent.id}" data-chip-id="${agent.id}" data-floor="${floorKey}" tabindex="0" role="button" aria-label="${layout.nameText}: ${layout.statusText}">
         <g transform="translate(${x.toFixed(1)}, ${y.toFixed(1)})">
           <g class="chip-scale">
             <!-- Đuôi mũi tên nhỏ chỉ xuống nhân vật -->
             <polygon points="-5,15 5,15 0,22" fill="#FFFDF9" stroke="${INK}" stroke-width="2" stroke-linejoin="round"/>
             <!-- Khung chip chính -->
-            <rect class="chip-bg" x="${(-halfW).toFixed(1)}" y="-15" width="${chipW}" height="31" rx="15.5" fill="#FFFDF9" stroke="${INK}" stroke-width="2.2"/>
+            <rect class="chip-bg" x="${(-layout.halfW).toFixed(1)}" y="-15" width="${layout.chipW}" height="31" rx="15.5" fill="#FFFDF9" stroke="${INK}" stroke-width="2.2"/>
             <!-- Chấm màu riêng của nhân vật -->
-            <circle cx="${(-halfW + 13).toFixed(1)}" cy="0.5" r="5" fill="${agent.color || '#F59E0B'}" stroke="${INK}" stroke-width="1.6"/>
+            <circle class="chip-agent-dot" cx="${(-layout.halfW + 13).toFixed(1)}" cy="0.5" r="5" fill="${agent.color || '#F59E0B'}" stroke="${INK}" stroke-width="1.6"/>
             <!-- Tên nhân vật -->
-            <text class="chip-name" x="${(-halfW + 23).toFixed(1)}" y="4.5" font-size="12" font-weight="800" fill="${INK}">${nameText}</text>
+            <text class="chip-name" x="${(-layout.halfW + 23).toFixed(1)}" y="4.5" font-size="12" font-weight="800" fill="${INK}">${layout.nameText}</text>
             <!-- Chip trạng thái có màu riêng -->
-            <rect x="${badgeX.toFixed(1)}" y="-10" width="${badgeW}" height="21" rx="10.5" fill="${meta.bg}" stroke="${meta.stroke}" stroke-width="1.5"/>
-            <circle cx="${(badgeX + 9).toFixed(1)}" cy="0.5" r="3.2" fill="${meta.fill}"/>
-            <text class="chip-status" x="${(badgeX + 16).toFixed(1)}" y="4.4" font-size="10.8" font-weight="800" fill="${meta.stroke}">${statusText}</text>
+            <rect class="chip-status-bg" x="${layout.badgeX.toFixed(1)}" y="-10" width="${layout.badgeW}" height="21" rx="10.5" fill="${layout.meta.bg}" stroke="${layout.meta.stroke}" stroke-width="1.5"/>
+            <circle class="chip-status-dot" cx="${(layout.badgeX + 9).toFixed(1)}" cy="0.5" r="3.2" fill="${layout.meta.fill}"/>
+            <text class="chip-status" x="${(layout.badgeX + 16).toFixed(1)}" y="4.4" font-size="10.8" font-weight="800" fill="${layout.meta.stroke}">${layout.statusText}</text>
           </g>
         </g>
       </g>
     `;
+  }
+
+  // Cập nhật tại chỗ chip trạng thái trên SVG (không tạo lại DOM)
+  function updateStatusChip(chipNode, agent) {
+    if (!chipNode || !agent) return;
+    const layout = computeChipLayout(agent);
+    const floorKey = agent.floor || (agent.id === 'khang' ? 'upper' : 'lower');
+
+    chipNode.setAttribute('data-floor', floorKey);
+    chipNode.setAttribute('aria-label', `${layout.nameText}: ${layout.statusText}`);
+
+    const chipBg = chipNode.querySelector('.chip-bg');
+    if (chipBg) {
+      chipBg.setAttribute('x', (-layout.halfW).toFixed(1));
+      chipBg.setAttribute('width', String(layout.chipW));
+    }
+
+    const agentDot = chipNode.querySelector('.chip-agent-dot');
+    if (agentDot) {
+      agentDot.setAttribute('cx', (-layout.halfW + 13).toFixed(1));
+      agentDot.setAttribute('fill', agent.color || '#F59E0B');
+    }
+
+    const nameEl = chipNode.querySelector('.chip-name');
+    if (nameEl) {
+      nameEl.setAttribute('x', (-layout.halfW + 23).toFixed(1));
+      nameEl.textContent = layout.nameText;
+    }
+
+    const statusBg = chipNode.querySelector('.chip-status-bg');
+    if (statusBg) {
+      statusBg.setAttribute('x', layout.badgeX.toFixed(1));
+      statusBg.setAttribute('width', String(layout.badgeW));
+      statusBg.setAttribute('fill', layout.meta.bg);
+      statusBg.setAttribute('stroke', layout.meta.stroke);
+    }
+
+    const statusDot = chipNode.querySelector('.chip-status-dot');
+    if (statusDot) {
+      statusDot.setAttribute('cx', (layout.badgeX + 9).toFixed(1));
+      statusDot.setAttribute('fill', layout.meta.fill);
+    }
+
+    const statusTextEl = chipNode.querySelector('.chip-status');
+    if (statusTextEl) {
+      statusTextEl.setAttribute('x', (layout.badgeX + 16).toFixed(1));
+      statusTextEl.setAttribute('fill', layout.meta.stroke);
+      statusTextEl.textContent = layout.statusText;
+    }
+  }
+
+  // Cập nhật tại chỗ biểu cảm & tốc độ nhịp động của nhân vật chibi khi đổi trạng thái
+  function updateAgentCharacter(svgRoot, agent) {
+    if (!svgRoot || !agent) return;
+    const animNode = svgRoot.querySelector(`[data-agent-anim="${agent.id}"]`);
+    const nextStatus = agent.status || 'working';
+    if (animNode) {
+      const prevStatus = animNode.getAttribute('data-status');
+      if (prevStatus !== nextStatus) {
+        animNode.setAttribute('data-status', nextStatus);
+        const exprNode = animNode.querySelector('.agent-expression');
+        if (exprNode) {
+          exprNode.innerHTML = renderExpressionSVG(nextStatus);
+        }
+      }
+    }
+
+    const hitNode = svgRoot.querySelector(`.svg-agent-hit[data-agent-id="${agent.id}"]`);
+    if (hitNode) {
+      hitNode.setAttribute('aria-label', `${agent.name} — ${agent.role}`);
+    }
   }
 
   // Hàm dựng toàn bộ SVG văn phòng 2 tầng
@@ -876,6 +957,8 @@
   global.OfficeSVG = {
     buildOfficeSVG: buildOfficeSVG,
     getStatusMeta: getStatusMeta,
+    updateStatusChip: updateStatusChip,
+    updateAgentCharacter: updateAgentCharacter,
     VIEWBOXES: VIEWBOXES
   };
 })(window);

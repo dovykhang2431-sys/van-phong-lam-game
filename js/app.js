@@ -1,12 +1,15 @@
 /* =========================================================================
- * Văn Phòng Làm Game v1.0 — Logic chính, đọc status.json, popup, đồng hồ,
- * chế độ ngày/đêm và vòng lặp chuyển động mượt 60fps
+ * Văn Phòng Làm Game v1.0 — Logic chính, đọc status.json trực tiếp (polling 5s),
+ * cập nhật tại chỗ không vẽ lại toàn DOM, popup, đồng hồ, chế độ ngày/đêm
+ * và vòng lặp chuyển động mượt 60fps
  * ========================================================================= */
 
 (function () {
   'use strict';
 
   const VERSION = '1.0';
+  const POLL_INTERVAL_MS = 5000;
+  const HIGHLIGHT_DURATION_MS = 1750;
   const THEME_STORAGE_KEY = 'van_phong_lam_game_theme';
 
   const ROOM_INFO = {
@@ -29,6 +32,9 @@
     antigravity: '🔧'
   };
 
+  const highlightTimers = new WeakMap();
+  let syncTickTimer = null;
+
   const state = {
     data: { agents: [], jobs: [], activity: [] },
     selectedRoom: null,
@@ -36,7 +42,16 @@
     toastTimer: null,
     rafId: null,
     zoomRafId: null,
-    currentViewBox: [0, 0, 920, 845]
+    currentViewBox: [0, 0, 920, 845],
+    officeRendered: false,
+    hasLoadedOnce: false,
+    isFetching: false,
+    pollTimerId: null,
+    lastUpdatedText: '',
+    syncStatus: 'loading',
+    openModal: null,
+    jobsSignatures: new Map(),
+    activitySnapshot: ''
   };
 
   // Tham chiếu DOM
@@ -55,6 +70,9 @@
     roomCaptionDesc: document.getElementById('roomCaptionDesc'),
     roomCaptionMembers: document.getElementById('roomCaptionMembers'),
     btnCloseRoomCaption: document.getElementById('btnCloseRoomCaption'),
+    liveSyncStatus: document.getElementById('liveSyncStatus'),
+    liveSyncDot: document.getElementById('liveSyncDot'),
+    liveSyncText: document.getElementById('liveSyncText'),
     tabJobs: document.getElementById('tabJobs'),
     tabActivity: document.getElementById('tabActivity'),
     sectionJobs: document.getElementById('sectionJobs'),
@@ -83,6 +101,13 @@
       .replace(/"/g, '&quot;');
   }
 
+  function formatTimeHMS(date) {
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `${hh}:${mm}:${ss}`;
+  }
+
   function showToast(message) {
     el.toast.textContent = message;
     el.toast.classList.remove('hidden');
@@ -92,13 +117,52 @@
     }, 2200);
   }
 
+  // Hiệu ứng làm nổi nhẹ ngắn hạn khi một chip hoặc một dòng vừa đổi trạng thái
+  function triggerLiveHighlight(node) {
+    if (!node) return;
+    const prevTimer = highlightTimers.get(node);
+    if (prevTimer) clearTimeout(prevTimer);
+
+    node.classList.remove('live-updated');
+    requestAnimationFrame(() => {
+      node.classList.add('live-updated');
+      const timer = setTimeout(() => {
+        node.classList.remove('live-updated');
+        highlightTimers.delete(node);
+      }, HIGHLIGHT_DURATION_MS);
+      highlightTimers.set(node, timer);
+    });
+  }
+
+  // Cập nhật chỉ báo trực tiếp "Cập nhật lúc HH:MM:SS" / "đang thử lại"
+  function setLiveSyncUI(mode, timeStr) {
+    state.syncStatus = mode;
+    if (!el.liveSyncStatus || !el.liveSyncText) return;
+
+    if (mode === 'ok') {
+      el.liveSyncStatus.classList.remove('is-retrying');
+      el.liveSyncText.textContent = `Cập nhật lúc ${timeStr}`;
+      if (el.liveSyncDot) {
+        el.liveSyncDot.classList.remove('is-ticking');
+        clearTimeout(syncTickTimer);
+        requestAnimationFrame(() => {
+          el.liveSyncDot.classList.add('is-ticking');
+          syncTickTimer = setTimeout(() => {
+            el.liveSyncDot.classList.remove('is-ticking');
+          }, 700);
+        });
+      }
+    } else if (mode === 'retrying') {
+      el.liveSyncStatus.classList.add('is-retrying');
+      el.liveSyncText.textContent = state.lastUpdatedText
+        ? `Cập nhật lúc ${state.lastUpdatedText} · đang thử lại`
+        : 'Đang thử lại...';
+    }
+  }
+
   // ===== Đồng hồ thời gian thực (chỉ cập nhật 1 text node, không vẽ lại DOM) =====
   function updateClock() {
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2, '0');
-    const mm = String(now.getMinutes()).padStart(2, '0');
-    const ss = String(now.getSeconds()).padStart(2, '0');
-    el.clockTime.textContent = `${hh}:${mm}:${ss}`;
+    el.clockTime.textContent = formatTimeHMS(new Date());
   }
 
   // ===== Chế độ Ngày / Đêm =====
@@ -139,17 +203,18 @@
     }
   }
 
-  function findAgentByNameOrId(key) {
+  function findAgentByNameOrId(key, agentsList) {
     if (!key) return null;
+    const list = Array.isArray(agentsList) ? agentsList : state.data.agents;
     const lower = String(key).trim().toLowerCase();
     return (
-      state.data.agents.find(
+      list.find(
         (a) => a.id.toLowerCase() === lower || a.name.toLowerCase() === lower
       ) || null
     );
   }
 
-  // ===== Vẽ Văn Phòng SVG và gắn sự kiện tương tác =====
+  // ===== Vẽ Văn Phòng SVG lần đầu và gắn sự kiện tương tác =====
   function renderOffice() {
     el.officeCanvasWrap.innerHTML = window.OfficeSVG.buildOfficeSVG(state.data.agents);
 
@@ -178,8 +243,61 @@
       });
     });
 
+    state.officeRendered = true;
     applyRoomHighlightUI(true);
     startAmbientAnimation();
+  }
+
+  // ===== Cập nhật tại chỗ chip trạng thái & biểu cảm nhân vật (không vẽ lại toàn SVG) =====
+  function patchOfficeInPlace(prevAgents, nextAgents) {
+    const svg = el.officeCanvasWrap.querySelector('.office-svg');
+    if (!svg) {
+      renderOffice();
+      return;
+    }
+
+    const prevMap = new Map();
+    prevAgents.forEach((a) => prevMap.set(a.id, a));
+
+    let membersMetaChanged = false;
+
+    nextAgents.forEach((agent) => {
+      const prev = prevMap.get(agent.id);
+      const chipVisualChanged =
+        !prev ||
+        prev.status !== agent.status ||
+        prev.name !== agent.name ||
+        prev.color !== agent.color ||
+        prev.floor !== agent.floor;
+
+      const roleChanged = !prev || prev.role !== agent.role || prev.name !== agent.name;
+      const stateOrTaskChanged =
+        !prev ||
+        prev.status !== agent.status ||
+        prev.currentTask !== agent.currentTask ||
+        prev.lastDone !== agent.lastDone;
+
+      if (chipVisualChanged || roleChanged) {
+        membersMetaChanged = true;
+      }
+
+      const chipNode = svg.querySelector(`[data-chip-id="${agent.id}"]`);
+      if (chipNode && chipVisualChanged) {
+        window.OfficeSVG.updateStatusChip(chipNode, agent);
+      }
+
+      if (chipVisualChanged || roleChanged) {
+        window.OfficeSVG.updateAgentCharacter(svg, agent);
+      }
+
+      if (chipNode && stateOrTaskChanged) {
+        triggerLiveHighlight(chipNode);
+      }
+    });
+
+    if (state.selectedRoom && membersMetaChanged) {
+      renderRoomCaptionMembers();
+    }
   }
 
   // ===== Phóng to mượt vào tầng được chọn (viewBox) =====
@@ -224,7 +342,7 @@
     const t0 = performance.now();
 
     function step(now) {
-      const p = Math.min(1, (now - t0) / duration);
+      const p = Math.max(0, Math.min(1, (now - t0) / duration));
       const ease = 1 - Math.pow(1 - p, 3);
       state.currentViewBox = [
         start[0] + (target[0] - start[0]) * ease,
@@ -254,6 +372,25 @@
       state.selectedRoom = roomId;
     }
     applyRoomHighlightUI(false);
+  }
+
+  function renderRoomCaptionMembers() {
+    if (!state.selectedRoom) return;
+    const floorAgents = state.data.agents.filter((a) => {
+      const floor = a.floor || (a.id === 'khang' ? 'upper' : 'lower');
+      return floor === state.selectedRoom;
+    });
+
+    el.roomCaptionMembers.innerHTML = floorAgents
+      .map(
+        (a) => `
+          <button type="button" class="member-pill-btn" data-caption-agent="${escapeHTML(a.id)}">
+            <span class="member-color-dot" style="background:${escapeHTML(a.color)}"></span>
+            ${escapeHTML(a.name)} · ${escapeHTML(a.role)}
+          </button>
+        `
+      )
+      .join('');
   }
 
   function applyRoomHighlightUI(immediateZoom) {
@@ -293,126 +430,249 @@
     el.roomCaptionTitle.textContent = info.title;
     el.roomCaptionDesc.textContent = info.desc;
 
-    const floorAgents = state.data.agents.filter((a) => {
-      const floor = a.floor || (a.id === 'khang' ? 'upper' : 'lower');
-      return floor === state.selectedRoom;
-    });
-
-    el.roomCaptionMembers.innerHTML = floorAgents
-      .map(
-        (a) => `
-          <button type="button" class="member-pill-btn" data-caption-agent="${escapeHTML(a.id)}">
-            <span class="member-color-dot" style="background:${escapeHTML(a.color)}"></span>
-            ${escapeHTML(a.name)} · ${escapeHTML(a.role)}
-          </button>
-        `
-      )
-      .join('');
-
-    el.roomCaptionMembers.querySelectorAll('[data-caption-agent]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const agent = findAgentByNameOrId(btn.getAttribute('data-caption-agent'));
-        if (agent) openAgentModal(agent);
-      });
-    });
-
+    renderRoomCaptionMembers();
     el.roomCaption.classList.remove('hidden');
   }
 
-  // ===== Dựng Bảng Công Việc =====
-  function renderJobs() {
-    const jobs = Array.isArray(state.data.jobs) ? state.data.jobs : [];
-    el.jobsCount.textContent = String(jobs.length);
+  // ===== Dựng & cập nhật tại chỗ Bảng Công Việc (chỉ sửa phần thay đổi) =====
+  function buildJobElement(job, dotColor) {
+    const meta = getJobStatusMeta(job.status);
+    const li = document.createElement('li');
+    li.setAttribute('data-job-item-id', String(job.id));
 
-    const doingCount = jobs.filter((j) => j.status === 'doing').length;
-    el.jobsSummary.textContent = `${doingCount} đang làm · ${jobs.length} tổng`;
-
-    if (jobs.length === 0) {
-      el.jobsList.innerHTML = '<li class="empty-state">Chưa có công việc nào trong status.json.</li>';
-      return;
-    }
-
-    el.jobsList.innerHTML = jobs
-      .map((job) => {
-        const meta = getJobStatusMeta(job.status);
-        const ownerAgent = findAgentByNameOrId(job.owner);
-        const dotColor = ownerAgent ? ownerAgent.color : '#94A3B8';
-        return `
-          <li>
-            <button type="button" class="job-btn" data-job-id="${escapeHTML(job.id)}">
-              <div class="job-top">
-                <span class="job-title">${escapeHTML(job.title)}</span>
-                <span class="status-pill ${meta.cls}">${escapeHTML(meta.label)}</span>
-              </div>
-              <div class="job-meta">
-                <span class="job-owner">
-                  <span class="member-color-dot" style="background:${escapeHTML(dotColor)}"></span>
-                  ${escapeHTML(job.owner)}
-                </span>
-                <span>Bắt đầu: ${escapeHTML(job.startedAt || '--:--')}</span>
-              </div>
-            </button>
-          </li>
-        `;
-      })
-      .join('');
-
-    el.jobsList.querySelectorAll('[data-job-id]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const jobId = btn.getAttribute('data-job-id');
-        const job = jobs.find((j) => String(j.id) === String(jobId));
-        if (job) openJobModal(job);
-      });
-    });
+    li.innerHTML = `
+      <button type="button" class="job-btn" data-job-id="${escapeHTML(job.id)}">
+        <div class="job-top">
+          <span class="job-title">${escapeHTML(job.title)}</span>
+          <span class="status-pill ${meta.cls}">${escapeHTML(meta.label)}</span>
+        </div>
+        <div class="job-meta">
+          <span class="job-owner">
+            <span class="member-color-dot" style="background:${escapeHTML(dotColor)}"></span>
+            <span class="job-owner-name">${escapeHTML(job.owner)}</span>
+          </span>
+          <span class="job-started">Bắt đầu: ${escapeHTML(job.startedAt || '--:--')}</span>
+        </div>
+      </button>
+    `;
+    return li;
   }
 
-  // ===== Dựng Nhật Ký Hoạt Động (mới nhất lên đầu, tối đa 20 dòng) =====
-  function renderActivity() {
-    const raw = Array.isArray(state.data.activity) ? state.data.activity : [];
-    const items = raw.slice(0, 20);
-    el.activityCount.textContent = String(items.length);
-    el.activitySummary.textContent = `${items.length} sự kiện gần nhất`;
+  function updateJobElementInPlace(li, job, dotColor) {
+    const meta = getJobStatusMeta(job.status);
+    const btn = li.querySelector('.job-btn');
+    if (btn) btn.setAttribute('data-job-id', String(job.id));
 
-    if (items.length === 0) {
-      el.activityList.innerHTML = '<li class="empty-state">Chưa có nhật ký hoạt động nào.</li>';
+    const titleEl = li.querySelector('.job-title');
+    if (titleEl && titleEl.textContent !== String(job.title || '')) {
+      titleEl.textContent = job.title || '';
+    }
+
+    const pillEl = li.querySelector('.status-pill');
+    if (pillEl) {
+      const nextCls = `status-pill ${meta.cls}`;
+      if (pillEl.className !== nextCls) pillEl.className = nextCls;
+      if (pillEl.textContent !== meta.label) pillEl.textContent = meta.label;
+    }
+
+    const dotEl = li.querySelector('.member-color-dot');
+    if (dotEl) dotEl.style.background = dotColor;
+
+    const ownerNameEl = li.querySelector('.job-owner-name');
+    if (ownerNameEl && ownerNameEl.textContent !== String(job.owner || '')) {
+      ownerNameEl.textContent = job.owner || '';
+    }
+
+    const startedEl = li.querySelector('.job-started');
+    const startedText = `Bắt đầu: ${job.startedAt || '--:--'}`;
+    if (startedEl && startedEl.textContent !== startedText) {
+      startedEl.textContent = startedText;
+    }
+  }
+
+  function renderJobsInPlace(isInitial) {
+    const jobs = Array.isArray(state.data.jobs) ? state.data.jobs : [];
+    const countText = String(jobs.length);
+    if (el.jobsCount.textContent !== countText) {
+      el.jobsCount.textContent = countText;
+    }
+
+    const doingCount = jobs.filter((j) => j.status === 'doing').length;
+    const summaryText = `${doingCount} đang làm · ${jobs.length} tổng`;
+    if (el.jobsSummary.textContent !== summaryText) {
+      el.jobsSummary.textContent = summaryText;
+    }
+
+    if (jobs.length === 0) {
+      if (!el.jobsList.querySelector('.empty-state') || el.jobsList.children.length !== 1) {
+        el.jobsList.innerHTML = '<li class="empty-state">Chưa có công việc nào trong status.json.</li>';
+      }
+      state.jobsSignatures.clear();
       return;
     }
 
-    el.activityList.innerHTML = items
-      .map((item, idx) => {
-        const agent = findAgentByNameOrId(item.agent);
-        const accent = agent ? agent.color : '#64748B';
-        return `
-          <li>
-            <button type="button" class="activity-btn" data-activity-idx="${idx}">
-              <span class="activity-time">${escapeHTML(item.time || '--:--')}</span>
-              <span class="activity-content">
-                <span class="activity-agent" style="color:${escapeHTML(accent)}">${escapeHTML(item.agent)}</span>
-                <span>${escapeHTML(item.text)}</span>
-              </span>
-            </button>
-          </li>
-        `;
-      })
-      .join('');
+    // Xóa thông báo rỗng nếu trước đó đang hiện
+    el.jobsList.querySelectorAll('.empty-state').forEach((n) => n.remove());
 
-    el.activityList.querySelectorAll('[data-activity-idx]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const idx = Number(btn.getAttribute('data-activity-idx'));
-        const entry = items[idx];
-        if (!entry) return;
-        const agent = findAgentByNameOrId(entry.agent);
-        if (agent) {
-          openAgentModal(agent);
-        } else {
-          showToast(`${entry.time} · ${entry.agent}: ${entry.text}`);
-        }
-      });
+    const existingNodes = new Map();
+    el.jobsList.querySelectorAll('li[data-job-item-id]').forEach((li) => {
+      existingNodes.set(li.getAttribute('data-job-item-id'), li);
     });
+
+    const nextSignatures = new Map();
+    const keepIds = new Set();
+
+    jobs.forEach((job, index) => {
+      const id = String(job.id);
+      keepIds.add(id);
+
+      const ownerAgent = findAgentByNameOrId(job.owner);
+      const dotColor = ownerAgent ? ownerAgent.color : '#94A3B8';
+      const sig = JSON.stringify([
+        job.title || '',
+        job.owner || '',
+        job.status || '',
+        job.startedAt || '',
+        job.description || '',
+        dotColor
+      ]);
+      nextSignatures.set(id, sig);
+
+      let li = existingNodes.get(id);
+      const prevSig = state.jobsSignatures.get(id);
+
+      if (!li) {
+        li = buildJobElement(job, dotColor);
+        const refNode = el.jobsList.children[index] || null;
+        el.jobsList.insertBefore(li, refNode);
+        if (!isInitial) {
+          triggerLiveHighlight(li.querySelector('.job-btn'));
+        }
+      } else {
+        if (prevSig !== sig) {
+          updateJobElementInPlace(li, job, dotColor);
+          if (!isInitial) {
+            triggerLiveHighlight(li.querySelector('.job-btn'));
+          }
+        }
+        // Đảm bảo đúng thứ tự mà không di chuyển nút đã đúng chỗ
+        const currentAtPos = el.jobsList.children[index];
+        if (currentAtPos !== li) {
+          el.jobsList.insertBefore(li, currentAtPos || null);
+        }
+      }
+    });
+
+    existingNodes.forEach((li, id) => {
+      if (!keepIds.has(id)) {
+        li.remove();
+      }
+    });
+
+    state.jobsSignatures = nextSignatures;
+  }
+
+  // ===== Dựng & cập nhật tại chỗ Nhật Ký Hoạt Động (mới nhất lên đầu, tối đa 20 dòng) =====
+  function buildActivityElement(item, idx, key, accent) {
+    const li = document.createElement('li');
+    li.setAttribute('data-activity-key', key);
+    li.innerHTML = `
+      <button type="button" class="activity-btn" data-activity-idx="${idx}">
+        <span class="activity-time">${escapeHTML(item.time || '--:--')}</span>
+        <span class="activity-content">
+          <span class="activity-agent" style="color:${escapeHTML(accent)}">${escapeHTML(item.agent)}</span>
+          <span class="activity-text">${escapeHTML(item.text)}</span>
+        </span>
+      </button>
+    `;
+    return li;
+  }
+
+  function renderActivityInPlace(isInitial) {
+    const raw = Array.isArray(state.data.activity) ? state.data.activity : [];
+    const items = raw.slice(0, 20);
+
+    const countText = String(items.length);
+    if (el.activityCount.textContent !== countText) {
+      el.activityCount.textContent = countText;
+    }
+
+    const summaryText = `${items.length} sự kiện gần nhất`;
+    if (el.activitySummary.textContent !== summaryText) {
+      el.activitySummary.textContent = summaryText;
+    }
+
+    if (items.length === 0) {
+      if (!el.activityList.querySelector('.empty-state') || el.activityList.children.length !== 1) {
+        el.activityList.innerHTML = '<li class="empty-state">Chưa có nhật ký hoạt động nào.</li>';
+      }
+      state.activitySnapshot = '[]';
+      return;
+    }
+
+    const keyCounts = new Map();
+    const enriched = items.map((item, idx) => {
+      const agent = findAgentByNameOrId(item.agent);
+      const accent = agent ? agent.color : '#64748B';
+      const baseKey = `${item.time || ''}|${item.agent || ''}|${item.text || ''}`;
+      const occ = (keyCounts.get(baseKey) || 0) + 1;
+      keyCounts.set(baseKey, occ);
+      const key = `${baseKey}#${occ}`;
+      return { item, idx, key, accent };
+    });
+
+    const nextSnapshot = JSON.stringify(enriched.map((e) => [e.key, e.accent]));
+    if (nextSnapshot === state.activitySnapshot && el.activityList.children.length === enriched.length) {
+      return;
+    }
+
+    el.activityList.querySelectorAll('.empty-state').forEach((n) => n.remove());
+
+    const existingNodes = new Map();
+    el.activityList.querySelectorAll('li[data-activity-key]').forEach((li) => {
+      existingNodes.set(li.getAttribute('data-activity-key'), li);
+    });
+
+    const keepKeys = new Set();
+
+    enriched.forEach(({ item, idx, key, accent }) => {
+      keepKeys.add(key);
+      let li = existingNodes.get(key);
+
+      if (!li) {
+        li = buildActivityElement(item, idx, key, accent);
+        const refNode = el.activityList.children[idx] || null;
+        el.activityList.insertBefore(li, refNode);
+        if (!isInitial) {
+          triggerLiveHighlight(li.querySelector('.activity-btn'));
+        }
+      } else {
+        const btn = li.querySelector('.activity-btn');
+        if (btn) btn.setAttribute('data-activity-idx', String(idx));
+        const agentEl = li.querySelector('.activity-agent');
+        if (agentEl) agentEl.style.color = accent;
+
+        const currentAtPos = el.activityList.children[idx];
+        if (currentAtPos !== li) {
+          el.activityList.insertBefore(li, currentAtPos || null);
+        }
+      }
+    });
+
+    existingNodes.forEach((li, key) => {
+      if (!keepKeys.has(key)) {
+        li.remove();
+      }
+    });
+
+    state.activitySnapshot = nextSnapshot;
   }
 
   // ===== Popup Chi Tiết Nhân Vật =====
-  function openAgentModal(agent) {
+  function openAgentModal(agent, opts) {
+    const keepFocus = Boolean(opts && opts.keepFocus);
+    state.openModal = { type: 'agent', id: agent.id };
+
     const statusMeta = window.OfficeSVG.getStatusMeta(agent.status);
     const floorKey = agent.floor || (agent.id === 'khang' ? 'upper' : 'lower');
     const floorText = floorKey === 'upper' ? 'Tầng 2 — Phòng Giám Đốc' : 'Tầng 1 — Phòng Làm Việc Chung';
@@ -468,11 +728,14 @@
     });
 
     el.modalBackdrop.classList.remove('hidden');
-    el.btnModalOk.focus();
+    if (!keepFocus) el.btnModalOk.focus();
   }
 
   // ===== Popup Chi Tiết Công Việc =====
-  function openJobModal(job) {
+  function openJobModal(job, opts) {
+    const keepFocus = Boolean(opts && opts.keepFocus);
+    state.openModal = { type: 'job', id: String(job.id) };
+
     const meta = getJobStatusMeta(job.status);
     const ownerAgent = findAgentByNameOrId(job.owner);
 
@@ -509,11 +772,31 @@
     }
 
     el.modalBackdrop.classList.remove('hidden');
-    el.btnModalOk.focus();
+    if (!keepFocus) el.btnModalOk.focus();
   }
 
   function closeModal() {
     el.modalBackdrop.classList.add('hidden');
+    state.openModal = null;
+  }
+
+  // Đồng bộ popup nếu người dùng đang mở popup đúng lúc dữ liệu đổi
+  function syncOpenModalIfChanged(prevData) {
+    if (!state.openModal || el.modalBackdrop.classList.contains('hidden')) return;
+
+    if (state.openModal.type === 'agent') {
+      const prevAgent = findAgentByNameOrId(state.openModal.id, prevData.agents);
+      const nextAgent = findAgentByNameOrId(state.openModal.id, state.data.agents);
+      if (nextAgent && JSON.stringify(prevAgent) !== JSON.stringify(nextAgent)) {
+        openAgentModal(nextAgent, { keepFocus: true });
+      }
+    } else if (state.openModal.type === 'job') {
+      const prevJob = prevData.jobs.find((j) => String(j.id) === state.openModal.id);
+      const nextJob = state.data.jobs.find((j) => String(j.id) === state.openModal.id);
+      if (nextJob && JSON.stringify(prevJob) !== JSON.stringify(nextJob)) {
+        openJobModal(nextJob, { keepFocus: true });
+      }
+    }
   }
 
   // ===== Vòng lặp chuyển động mượt 60fps bằng requestAnimationFrame =====
@@ -582,13 +865,19 @@
     state.rafId = requestAnimationFrame(tick);
   }
 
-  // ===== Đọc dữ liệu từ status.json =====
+  // ===== Đọc dữ liệu từ status.json (cache-busting + giữ dữ liệu cũ khi lỗi) =====
   async function loadStatusData(isManualReload) {
+    if (state.isFetching) return false;
+    state.isFetching = true;
+
     try {
       const url = `./status.json?t=${Date.now()}`;
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+
+      const prevData = state.data;
+      const isInitial = !state.hasLoadedOnce;
 
       state.data = {
         agents: Array.isArray(json.agents) ? json.agents : [],
@@ -596,19 +885,49 @@
         activity: Array.isArray(json.activity) ? json.activity : []
       };
 
-      renderOffice();
-      renderJobs();
-      renderActivity();
+      if (!state.officeRendered) {
+        renderOffice();
+      } else {
+        patchOfficeInPlace(prevData.agents, state.data.agents);
+      }
+
+      renderJobsInPlace(isInitial);
+      renderActivityInPlace(isInitial);
+      syncOpenModalIfChanged(prevData);
+
+      const nowStr = formatTimeHMS(new Date());
+      state.lastUpdatedText = nowStr;
+      state.hasLoadedOnce = true;
+      setLiveSyncUI('ok', nowStr);
 
       if (isManualReload) {
         showToast('Đã cập nhật dữ liệu mới từ status.json');
       }
-    } catch (err) {
-      console.error('Không thể tải status.json:', err);
-      el.jobsList.innerHTML = '<li class="empty-state">Lỗi tải status.json. Hãy mở qua HTTP server.</li>';
-      el.activityList.innerHTML = '<li class="empty-state">Không thể đọc nhật ký hoạt động.</li>';
-      showToast('Lỗi đọc status.json');
+      return true;
+    } catch (_err) {
+      // Mất mạng / lỗi tạm thời: giữ nguyên dữ liệu cũ, hiện trạng thái "đang thử lại", không làm trang trắng
+      setLiveSyncUI('retrying');
+      if (!state.hasLoadedOnce) {
+        if (!state.officeRendered) {
+          renderOffice();
+        }
+        el.jobsSummary.textContent = 'Đang thử lại...';
+        el.jobsList.innerHTML = '<li class="empty-state">Đang kết nối tới status.json, đang thử lại...</li>';
+        el.activityList.innerHTML = '<li class="empty-state">Đang thử lại lấy nhật ký hoạt động...</li>';
+      } else if (isManualReload) {
+        showToast('Mất kết nối — giữ dữ liệu cũ, đang thử lại');
+      }
+      return false;
+    } finally {
+      state.isFetching = false;
     }
+  }
+
+  function startLivePolling() {
+    if (state.pollTimerId) clearInterval(state.pollTimerId);
+    state.pollTimerId = setInterval(() => {
+      loadStatusData(false);
+    }, POLL_INTERVAL_MS);
   }
 
   // ===== Tab chuyển bảng trên màn hình nhỏ =====
@@ -643,12 +962,42 @@
     updateClock();
     setInterval(updateClock, 1000);
 
+    // Ủy quyền sự kiện cho danh sách công việc, nhật ký & thành viên phòng (không cần gắn lại khi polling)
+    el.jobsList.addEventListener('click', (evt) => {
+      const btn = evt.target.closest('[data-job-id]');
+      if (!btn) return;
+      const jobId = btn.getAttribute('data-job-id');
+      const job = state.data.jobs.find((j) => String(j.id) === String(jobId));
+      if (job) openJobModal(job);
+    });
+
+    el.activityList.addEventListener('click', (evt) => {
+      const btn = evt.target.closest('[data-activity-idx]');
+      if (!btn) return;
+      const idx = Number(btn.getAttribute('data-activity-idx'));
+      const entry = state.data.activity[idx];
+      if (!entry) return;
+      const agent = findAgentByNameOrId(entry.agent);
+      if (agent) {
+        openAgentModal(agent);
+      } else {
+        showToast(`${entry.time} · ${entry.agent}: ${entry.text}`);
+      }
+    });
+
+    el.roomCaptionMembers.addEventListener('click', (evt) => {
+      const btn = evt.target.closest('[data-caption-agent]');
+      if (!btn) return;
+      const agent = findAgentByNameOrId(btn.getAttribute('data-caption-agent'));
+      if (agent) openAgentModal(agent);
+    });
+
     // Gắn sự kiện cho mọi nút trên màn hình (không nút chết)
     el.btnFloorUpper.addEventListener('click', () => toggleRoomHighlight('upper'));
     el.btnFloorLower.addEventListener('click', () => toggleRoomHighlight('lower'));
     el.btnCloseRoomCaption.addEventListener('click', () => {
       state.selectedRoom = null;
-      applyRoomHighlightUI();
+      applyRoomHighlightUI(false);
     });
 
     el.btnThemeToggle.addEventListener('click', () => {
@@ -678,16 +1027,26 @@
       }
     });
 
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && state.hasLoadedOnce) {
+        loadStatusData(false);
+      }
+    });
+
     // Xuất API nhỏ giúp tự kiểm thử trạng thái thực
     window.VanPhongGame = {
       VERSION: VERSION,
+      POLL_INTERVAL_MS: POLL_INTERVAL_MS,
       getState: () => state.data,
       getSelectedRoom: () => state.selectedRoom,
+      getLastUpdated: () => state.lastUpdatedText,
+      getSyncStatus: () => state.syncStatus,
       reload: () => loadStatusData(false),
       highlightRoom: (roomId) => toggleRoomHighlight(roomId)
     };
 
     loadStatusData(false);
+    startLivePolling();
     registerServiceWorker();
   }
 
